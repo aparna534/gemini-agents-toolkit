@@ -1,4 +1,3 @@
-"""An agent for executing user's instructions with streaming support"""
 
 import logging
 import inspect
@@ -46,7 +45,6 @@ class GeminiAgent:
                   f"Last error: {retry_state.outcome.exception()}")
 
 
-# pylint: disable-next=too-many-instance-attributes
 class ADKAgentService:
     """An agent to request LLM for executing users instructions with tools (custom functions) provided by user"""
 
@@ -426,7 +424,6 @@ def create_agent_from_functions_list(
         self.session_service = session_service if session_service else InMemorySessionService()
         self.runners = {}
         self.app_name = app_name
-        # Lock for thread-safe access to runners dictionary during creation
         self.runner_lock = threading.Lock()
         self.events_per_session = events_per_session
         logging.info(f"ADKAgentService initialized with: app_name='{self.app_name}', "
@@ -466,7 +463,6 @@ def create_agent_from_functions_list(
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=2, max=16), after=log_retry_error, retry=retry_if_not_exception_type(TooManyFunctionCallsException))
     def send_message(self, msg: str, *, user_id="default_user", session_id=None, events=[]) -> tuple[str, list]:
         """Initiate communication with LLM to execute user's instructions"""
-        # Log at the very beginning of the method
         effective_session_id = session_id if session_id else "new_session"
         logging.info(f"send_message called for user_id='{user_id}', session_id='{effective_session_id}'. Message: '{msg[:100]}{'...' if len(msg) > 100 else ''}'")
 
@@ -483,7 +479,7 @@ def create_agent_from_functions_list(
         runner_instance = self.runners.get(runner_id)
         if not runner_instance:
             with self.runner_lock:
-                runner_instance = self.runners.get(runner_id) # Double-check
+                runner_instance = self.runners.get(runner_id) 
                 if not runner_instance:
                     try:
                         logging.info(f"Creating new Runner instance for runner_id='{runner_id}', session_id='{session_id}'.")
@@ -495,17 +491,12 @@ def create_agent_from_functions_list(
                         self.runners[runner_id] = runner_instance
                         logging.info(f"Runner instance created and cached for runner_id='{runner_id}', session_id='{session_id}'.")
                     except Exception as e:
-                        # Original logging.exception is good here as it includes traceback
                         logging.exception(f"Fatal Error creating agent/runner for session_id='{session_id}', runner_id='{runner_id}': {e}")
-                        # It might be appropriate to re-raise or return an error response here
-                        # For now, we'll let it proceed, which likely results in an error later if runner_instance is None
-                        # However, the original code also didn't explicitly handle this case beyond logging.
+                        
         
         if not runner_instance:
             logging.critical(f"Runner instance is None for session_id='{session_id}', runner_id='{runner_id}'. Cannot proceed.")
-            # Option 1: Raise an exception
-            # raise RuntimeError("Failed to initialize agent runner.")
-            # Option 2: Return an error tuple (as per subtask preference)
+            
             return "Failed to initialize agent runner.", []
 
         user_content = genai_types.Content(role='user', parts=[genai_types.Part(text=msg)])
@@ -514,7 +505,7 @@ def create_agent_from_functions_list(
         
         logging.info(f"Preparing to call runner_instance.run() for session_id='{session_id}'.")
         try:
-            for event in runner_instance.run( # This assumes runner_instance was successfully created.
+            for event in runner_instance.run( 
                 user_id=user_id,
                 new_message=user_content,
                 session_id=session_id):
@@ -540,11 +531,9 @@ def create_agent_from_functions_list(
                     break
         except genai_types.BlockedPromptException as e:
                 logging.warning(f"Prompt was blocked for session {session_id}: {e}")
-                # Potentially set a specific error message for the user
                 final_response_text = "Your prompt was blocked. Please modify your prompt and try again."
         except genai_types.StopCandidateException as e:
                 logging.warning(f"Content generation stopped for session {session_id}: {e}")
-                # Potentially set a specific error message for the user
                 final_response_text = "The response could not be completed. Please try again."
         except google_exceptions.DeadlineExceeded as e:
                 logging.error(f"API request timed out during runner.run for session_id='{session_id}': {e}")
@@ -552,16 +541,14 @@ def create_agent_from_functions_list(
         except google_exceptions.GoogleAPIError as e:
                 logging.error(f"A Google API error occurred during runner.run for session_id='{session_id}': {e}")
                 final_response_text = "An API error occurred. Please try again later."
-        except Exception as e: # Keep a general exception handler as a fallback
+        except Exception as e: 
                 logging.exception(f"An unexpected error occurred during runner.run for session_id='{session_id}': {e}")
-                # It might be good to set a generic error message for final_response_text here too
+                
                 final_response_text = "An unexpected error occurred. Please try again."
         
         logging.info(f"runner_instance.run() completed or errored for session_id='{session_id}'.")
 
-        # The ADK may provide a final text response here. However, the agent's design might rely on
-        # a tool (e.g., send_chat_message_tool) to deliver the ultimate response to the user.
-        # This logged text is the direct final output from the ADK runner.
+        
         if final_response_text:
                 logging.debug(f"Final response text for session_id='{session_id}' (prior to on_message): '{final_response_text[:100]}{'...' if len(final_response_text) > 100 else ''}'")
         else:
@@ -573,8 +560,7 @@ def create_agent_from_functions_list(
             logging.info(f"on_message callback completed for session_id='{session_id}'.")
         
         logging.info(f"Returning final response for session_id='{session_id}'. Response: '{final_response_text[:100]}{'...' if len(final_response_text) > 100 else ''}'")
-        # The events returned here are from a fresh call to _maybe_create_chat_session, which fetches/creates and appends history.
-        # This is the original behavior.
+        
         returned_events = self._maybe_create_chat_session(
             session_id=session_id, user_id=user_id, num_recent_events=self.events_per_session).events
         logging.debug(f"Returning {len(returned_events)} events for session_id='{session_id}'.")
